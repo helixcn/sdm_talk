@@ -1,0 +1,145 @@
+---
+title: "地图绘制"
+author: "张金龙"
+date: "2021-05-29"
+output: 
+  html_document: 
+    toc: yes
+    number_sections: yes
+---
+
+# 加载绘图用的程序包和数据
+
+```{R}
+# setwd("C:/Users/jlzhang/Desktop/sdm_talk/03 visualisation")
+# load("C:/Users/jlzhang/Desktop/sdm_talk/02 cropping and modelling/ENMeval20210528.RData")
+
+setwd("/Users/jinlong/Desktop/sdm_talk\ 2/03\ visualisation/")
+load("/Users/jinlong/Desktop/sdm_talk\ 2/02\ cropping\ and\ modelling/ENMeval20210528.RData")
+
+library(sf)
+library(tmap)
+library(raster)
+
+world <- read_sf("./shapefiles/world.shp")
+china <- read_sf("./shapefiles/bou1_4l.shp")
+provinces <- read_sf("./shapefiles/province_polygon.shp")
+```
+
+# 绘制适宜分布区图 （适宜/不适宜）
+## 基于tmap写的一个函数，展示适宜梯度
+```{R}
+show_map <-
+  function(r,
+           title = "",
+           palette = NULL,
+           legend.show = TRUE,
+           main_title) {
+
+    res <- tm_shape(r) +
+      tm_raster(title = title,
+                legend.show = legend.show,
+                palette = palette) +
+      tm_shape(provinces) +
+      tm_borders(col = "grey", lwd = 0.6, lty = 4) +
+      tm_shape(china) +
+      tm_lines(col = "grey") +
+      tm_shape(world) +
+      tm_borders(col = "grey") +
+      tm_scale_bar(position = c("left", "bottom")) +
+      tm_compass(type = "arrow", position = c("right", "top")) +
+      tm_layout(main.title = main_title,
+                legend.position = c("right", "bottom"))
+    return(res)
+  }
+
+```
+
+## 生成tiff文件
+
+```{R}
+tmap_color <-
+  show_map(
+    eval_records_all_cloglog,
+    "Suitability",
+    palette = "-Spectral",
+    main_title = "The suitability of Castanopsis fargesii",
+    legend.show = TRUE
+  )
+
+tmap_color
+
+tiff(
+  "Suitability_color.tiff",
+  width = 5600,
+  height = 4200,
+  compression = "lzw",
+  res = 600
+)
+tmap_color
+dev.off()
+```
+
+
+# 绘制适宜分布区图 （适宜/不适宜）
+## 基于tmap写的一个函数，（绿色代表适宜，橙色代表不适宜）
+
+```{R}
+show_map2 <-
+  function(r,
+           title = "",
+           palette = NULL,
+           legend.show = TRUE,
+           main_title) {
+    r0 <- r
+    r[r0 > 0] <- "Suitable"
+    r[!r0 > 0] <- "Not suitable"
+    
+    res <- tm_shape(r) +
+      tm_raster(title = title,
+                legend.show = legend.show,
+                palette = palette) +
+      tm_shape(provinces) +
+      tm_borders(col = "grey", lwd = 0.6, lty = 4) +
+      tm_shape(china) +
+      tm_lines(col = "grey") +
+      tm_shape(world) +
+      tm_borders(col = "grey") +
+      tm_scale_bar(position = c("left", "bottom")) +
+      tm_compass(type = "arrow", position = c("right", "top")) +
+      tm_layout(main.title = main_title)
+    return(res)
+  }
+
+
+```
+
+## 生成tiff文件
+
+```{R}
+tmap2 <-
+  show_map2(
+    records_all_binary_spec_sens,
+    palette = "-Pastel2",
+    main_title = "The suitability of Castanopsis fargesii",
+    legend.show = TRUE
+  )
+
+tmap2
+
+tiff(
+  "Suitability_binary.tiff",
+  width = 5600,
+  height = 4200,
+  compression = "lzw",
+  res = 600
+)
+tmap2
+dev.off()
+```
+
+# SessionInfo
+
+```{R}
+sessionInfo()
+```

@@ -1,0 +1,67 @@
+---
+title: "裁切气候图层生成ascii文件"
+author: "张金龙"
+date: "2021-05-29"
+output: 
+    html_document: 
+    toc: yes
+number_sections: yes
+---
+
+
+# 目的
+
+本脚本按照kml多边形（可在google earth绘制）给出的范围裁切bioclim图层，并将结果保存为ascii文件格式
+
+# 加载程序包
+
+```{R}
+# setwd("C:/Users/jlzhang/Desktop/sdm_talk/02 cropping and modelling")
+setwd("/Users/jinlong/Desktop/sdm_talk\ 2/02\ cropping\ and\ modelling/")
+library("raster")
+library(sf)
+library(rgdal)
+```
+
+# 读取所有的bioclim.tif文件
+```{R}
+all_files <- list.files(full.names = TRUE)
+tif_files <- all_files[grep(pattern = "\\.tif", all_files)]
+```
+
+# 读取kml文件（多边形）
+```{R}
+region <- rgdal::readOGR("Castanopsis fargesii range to model.kml")
+plot(region)
+
+#bio1 <- raster(tif_files[1])
+# plot(bio1)
+
+```
+
+# 依次裁切每个读取的tiff文件并保存为ascii
+
+```{R}
+for (i in 1:length(tif_files)) {
+    bio1 <- raster(tif_files[i])
+    cropped_bio1 <- crop(bio1, region)
+    cropped_bio1 <- mask(cropped_bio1, region)
+    writeRaster(
+        cropped_bio1,
+        filename = paste(gsub("//.asc", "", tif_files[i])),
+        format = "ascii",
+        overwrite = TRUE
+    )
+    print(i)
+}
+
+## 显示一个图层
+plot(cropped_bio1)
+```
+
+# R Session Info
+
+```{R}
+sessionInfo()
+```
+

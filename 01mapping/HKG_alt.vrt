@@ -1,0 +1,15 @@
+<VRTDataset rasterXSize="84" rasterYSize="72">
+<GeoTransform>113.8, 0.008333333, 0, 22.7, 0, -0.008333333</GeoTransform>
+<SRS>+proj=longlat +ellps=WGS84</SRS>
+	<VRTRasterBand dataType="Int16" band="1" subClass="VRTRawRasterBand">
+		<Description>HKG_alt</Description>
+		<SourceFilename relativetoVRT="1">HKG_alt.gri</SourceFilename>
+		<ImageOffset>0</ImageOffset>
+		<PixelOffset>2</PixelOffset>
+		<LineOffset>168</LineOffset>
+		<ByteOrder>LSB</ByteOrder>
+		<NoDataValue>-9999</NoDataValue>
+		<Offset>0</Offset>
+		<Scale>1</Scale>
+	</VRTRasterBand>
+</VRTDataset>

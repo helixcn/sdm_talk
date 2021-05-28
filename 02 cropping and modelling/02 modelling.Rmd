@@ -1,0 +1,308 @@
+---
+title: "运行Maxent"
+author: "张金龙"
+date: "2021-05-29"
+output: 
+  html_document: 
+    toc: yes
+    number_sections: yes
+---
+
+# 加载要用到的程序包
+```{R}
+# setwd("C:/Users/jlzhang/Desktop/sdm_talk/02 cropping and modelling")
+setwd("/Users/jinlong/Desktop/sdm_talk\ 2/02\ cropping\ and\ modelling/")
+library(ENMeval)
+library(spocc)
+library(spThin)
+library(raster)
+# library(plantlist)
+library(sp)
+library(corrplot)
+library(dismo)
+```
+
+# 加载环境图层
+
+```{R}
+all_files <- list.files(full.names = TRUE)
+asc_list0 <- all_files[grep(pattern = "\\.asc", all_files)]
+asc_list <- asc_list0[grep(pattern = "bio", asc_list0)]
+
+# Load the bioclimatic layers
+clim <- raster::stack(asc_list)
+crs(clim) <- "+proj=longlat +datum=WGS84 +no_defs"
+```
+
+# 去掉多重共线性严重的环境图层
+
+## 显示Pearson's R矩阵
+```{R}
+### 看下面的相关矩阵图，只保留一部分变量，让相关系数全部降低到0.80以下
+cors2 <- cor(values(clim), use = 'complete.obs')
+corrplot(cors2,
+         order = "AOE",
+         addCoef.col = "grey",
+         number.cex = .6) # plot correlations
+```
+
+## 第一种方法：用findCorrelation去掉Pearson's r > 0.8的环境图层
+
+```{R}
+library(caret)
+selected_index <- findCorrelation(cors2, cutoff = 0.8) # 返回要去掉的环境图层的下标
+
+clim2 <- subset(clim, subset = row.names(cors2)[-selected_index])
+
+cors3 <- cor(values(clim2), use = 'complete.obs')
+
+corrplot(cors3,
+         order = "AOE",
+         addCoef.col = "grey",
+         number.cex = .6) # plot correlations
+```
+
+## 第二种方法，去掉膨胀因子vif > 10的环境图层
+
+```{R}
+#### library(HH)
+#### res_vif <- data.frame(vif(as.data.frame(clim)))
+#### layer to keep
+#### layers_to_keep <- rownames(res_vif)[res_vif <= 10]
+#### clim2 <- subset(clim, subset = layers_to_keep)
+```
+
+# 分布记录的稀疏化 （保证每个栅格当中只有一条记录）
+
+## 随机分割为训练数据（training）和检验数据（testing）
+```{R}
+# 如果是xlsx文件，则直接使用openxlsx::read.xlsx()
+# library(openxlsx)
+
+records <- read.csv("Castanopsis_fargesii_clean.csv")
+
+records$decimalLongitude <- as.numeric(records$decimalLongitude)
+records$decimalLatitude  <- as.numeric(records$decimalLatitude)
+
+records <-
+  subset(records, select = c("decimalLongitude", "decimalLatitude"))
+
+colnames(records) <-
+  c("x", "y") # 必须要用x,y命名，以保证和pseudo backgrounds的数据框名称相符
+
+# coordinates(records) <- ~ x + y
+
+set.seed(12345) # random partition (25% of records)
+selection_index <- sample(1:nrow(records), round(nrow(records) / 4))
+
+records_for_test <- records[selection_index, ]
+records_for_training <- records[-selection_index, ]
+```
+
+
+## 分布数据的稀疏化
+
+```{R}
+# thin the testing data
+thin <- function(x) {
+  cells <- cellFromXY(clim2[[1]], x)
+  dups <- duplicated(cells)
+  res <- x[!dups,]
+  cat("Number of records before thinning:", nrow(x), "\n")
+  cat("Number of records after thinning:", nrow(res), "\n")
+  return(res)
+}
+
+
+print("the testing dataset")
+records_for_test_thinned <- thin(records_for_test)
+
+print("The training dataset")
+records_for_training_thinned <- thin(records_for_training)
+
+```
+
+## 在环境图层的范围内生成伪不出现的分布点（pseudo-absence）
+
+```{R}
+library(dismo)
+bg <- randomPoints(clim2[[1]], n = 10000)
+bg <- as.data.frame(bg)
+```
+
+# 用ENMeval包驱动Maxent筛选“繁简适中”的模型
+
+之所以用ENVevalute，是因为可以调整参数，并在这个范围内选取Delta AICc最优的模型，防止模型过度拟合
+
+```{R}
+
+## 要素类型
+### Notice fc (feature classes): Acceptable values for the fc argument include: L=linear, Q=quadratic, P=product, T=threshold, and H=hinge
+
+# (1) the range of regularization multiplier values and 
+# (2) the combinations of feature classes (Elith et al. 2011, Merow et al. 2013)
+
+## 调控倍频 (朱耿平等) 朱耿平, & 乔慧捷. (2016). Maxent模型复杂度对物种潜在分布区预测的影响. 生物多样性, 24(010), 1189-1196.
+## The regularization multiplier (RM) determines the penalty associated with including variables or their transformations in the model. Higher RM values impose a stronger penalty on model complexity and thus result in simpler (flatter) model predictions. 
+
+## The feature classes determine the potential shape of the marginal response curves. 
+
+eval_records_all <- ENMevaluate(
+  occs = records_for_training_thinned,
+  envs = clim2,
+  bg = bg,
+  partitions = 'checkerboard1',
+  tune.args = list(fc = c("L", "LQ"), rm = c(0.1, seq(0.5, 5, 1))), 
+  # RMvalues = c(0.1, seq(0.5, 5, 1)),
+  # fc = c("L", "LQ"),
+  # fc=c("L", "LQ", "H", "LQH", "LQHP", "LQHPT"),
+  algorithm = 'maxent.jar'#,
+#   bin.output = FALSE
+)
+
+```
+
+### Delta AICc最小的模型
+
+在ENMevaluate 2.0以前，所得结果为raw，没有经过cloglog转换，
+ENMevaluate 2.0以后，所得结果自动经过cloglog转换
+```{R}
+# A panel plot showing the suitability for each scenario
+plot(eval_records_all@predictions, main = "All records")
+
+evalplot.stats(
+  e = eval_records_all,
+  stats = c("delta.AICc"),
+  color = "fc",
+  x.var = "rm",
+  error.bars = FALSE
+)
+
+# the index of the best model 如果有多个相同的AICc，则只选取第一个
+bestmodel_index <- which(eval_records_all@results$delta.AICc == 0)[1]
+
+bestmodel_index2 <- which(eval_records_all@results$delta.AICc == 0)
+
+eval_records_all@results[bestmodel_index2, ] # 查看Model，有几个就显示几个
+
+# The Model with the lowest AICc (raw format)，只绘制一个
+plot(eval_records_all@predictions[[bestmodel_index]], main = "Relative occurrence rate (All records)")
+```
+
+### 用cloglog将raw图层转换为0-1区间的概率（只适用于ENMevaluate 2.0以前）
+
+注意： `predict`为dismo中的函数
+
+```{R}
+
+###############################
+### Transform the prediction into cloglog format (0-1)
+eval_records_all_cloglog <-
+  predict(eval_records_all@models[[bestmodel_index]],
+          clim2,
+          args = c("outputformat=cloglog"))
+
+### show the cloglog output
+plot(eval_records_all_cloglog, main = "All records (cloglog)")
+```
+
+# 模型的评价以及适宜分布区（适宜/不适宜）的标准
+```{R}
+### Get the threshold of the binary output
+records_all_ev.set <-
+  evaluate(records_for_test, bg, eval_records_all@models[[bestmodel_index]], clim2)
+
+records_all_th1 = threshold(records_all_ev.set) # Threshold
+
+records_all_th1
+
+```
+
+# 绘制适宜分布区图
+
+```{R}
+### converet to binary output based on spec_sens
+records_all_binary_spec_sens <-
+  eval_records_all_cloglog >= records_all_th1$spec_sens
+
+plot(records_all_binary_spec_sens, main = "All records")
+
+# 根据栅格大小，粗略估计分布区面积（单位为平方千米）
+get_area_presence <- function(x) {
+  cell_size = area(x)@data@values
+  return(sum(na.omit(cell_size[x@data@values == 1])))
+}
+
+### Suitable Area
+area_records_all_binary_spec_sens <-
+  get_area_presence(records_all_binary_spec_sens)
+
+print("The suitable area for Castanopsis fargesii is:")
+print(paste0(round(area_records_all_binary_spec_sens, 2), "km^2"))
+
+# records_all_th2 此数据用于有多个种的时候，展示数据的时候用
+records_all_th2 <-
+  cbind(records_all_th1, area_records_all_binary_spec_sens)
+
+colnames(records_all_th2) <-
+  c(colnames(records_all_th1), "suitable_area_spec_sens")
+```
+
+### 各因子的相对重要性 
+
+```{R}
+
+aic.opt <-
+  eval_records_all@models[[which(eval_records_all@results$delta.AICc == 0)[1]]]
+
+
+
+var.importance <- function(x) {
+  temp <-
+    x@results[grepl('permutation.importance', rownames(x@results)),]
+  names(temp) <-
+    gsub("\\.permutation\\.importance", "", names(temp))
+  return(temp)
+}
+
+(df <- var.importance(aic.opt))
+
+par(mar = c(8, 4.1, 4.1, 2.1))
+barplot(
+  df,
+  names.arg = row.names(df),
+  las = 2,
+  ylab = "Permutation Importance",
+  main = "All records"
+)
+
+# 查看所有模型中，各环境图层的相对重要性
+eval_records_all@variable.importance
+
+```
+
+
+```{R}
+
+plot(
+  eval_records_all@predictions[[1]],
+  legend = FALSE,
+  main = "Background Points",
+  xlab = "Longitude",
+  y = "Latitude"
+)
+# Now add the occurrence and background points, colored by evaluation bins:
+points(eval_records_all@occs, pch=3, col=eval_records_all@bg.grp, cex=0.5)
+## 黑色为 
+
+# points(eval_records_all@occ.pts, pch=21, bg=eval_records_all@occ.grp) ## 背景数据
+
+# response(eval_records_all@models[[1]], main = "All records")
+```
+
+
+# Session Information
+```{R}
+sessionInfo()
+save.image("ENMeval20210528.RData")
+```

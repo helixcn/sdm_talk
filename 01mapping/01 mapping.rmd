@@ -1,0 +1,197 @@
+---
+title: "绘制物种分布图，了解分布数据的可能问题"
+author: "张金龙"
+date: "2021-05-29"
+output: 
+  html_document: 
+    toc: yes
+    number_sections: yes
+---
+
+# 加载程序包和数据
+```{R}
+# setwd("C:/Users/jlzhang/Desktop/sdm_talk/01mapping")
+setwd("/Users/jinlong/Desktop/sdm_talk\ 2/01mapping/")
+rm(list = ls())
+library(rgdal)
+library(tmap)
+library(tmaptools)
+library(sp)
+library(openxlsx)
+library(sf)
+
+# 中国国界线，polyline
+country  <- readOGR("bou1_4l.shp")
+proj4string(country) <- CRS("+proj=longlat +datum=WGS84")
+
+province <- readOGR("province_polygon.shp") # 省多边形
+world <- readOGR("world20200121_polygon.shp") # 世界政区
+boundary <- readOGR("Castanopsis fargesii range to model.kml") # 手工划定的要预测范围（google earth绘制多边形，保存为kml文件）
+
+```
+
+# 物种分布数据的清洁（cleaning）和重新保存
+```{R}
+library(tidyverse)
+
+# data(World)
+# library(readxl)
+# windowsFonts(Times=windowsFont("TT Times New Roman")) #
+
+
+# GBIF 的csv文件的各列，并非用英文逗号分隔，而是用制表符分隔。目前已知用tidyverse的read_delim函数可以读取
+
+cf_dat <- read_delim("0285363-200613084148143.csv", delim = "\t")
+
+# 去掉没有经纬度的记录
+cf_dat_with_long_lat <-
+    cf_dat[(!is.na(cf_dat$decimalLongitude)) |
+               (!is.na(cf_dat$decimalLatitude)), ]
+
+# 经纬度转换为数值
+cf_dat_with_long_lat$decimalLongitude <-
+    as.numeric(cf_dat_with_long_lat$decimalLongitude)
+cf_dat_with_long_lat$decimalLatitude  <-
+    as.numeric(cf_dat_with_long_lat$decimalLatitude)
+
+# 因为读入的数据为tibble，但是为了便于操作，这里转换为data.frame
+cf_dat_with_long_lat <- as.data.frame(cf_dat_with_long_lat)
+
+# 转换位为 spatial points 并设定坐标系为WGS84坐标系
+coordinates(cf_dat_with_long_lat) <-
+    ~ decimalLongitude + decimalLatitude
+proj4string(cf_dat_with_long_lat) <-
+    CRS("+proj=longlat +datum=WGS84")
+
+# 保存为csv文件
+write.csv(cf_dat_with_long_lat, "Castanopsis_fargesii_clean.csv")
+
+```
+
+# 绘制物种分布图（基于分布点坐标 WGS84坐标系）
+```{R}
+map <- tm_shape(world,
+                xlim = c(60, 140),
+                ylim = c(-10, 55)) + # 世界政区 (polygon)
+    tm_borders("grey70", lwd = .8) +
+    
+    tm_shape(country) + # 国界线 (polyline)
+    tm_lines(col = "grey")  +
+    
+    tm_shape(province) + # 省份 (polygon)
+    tm_fill(col = "white", alpha = 0) +
+    tm_borders("grey80", lwd = 0.6) +
+    tm_text("ID", size = 0.8, col = "grey20") +
+    
+    tm_shape(boundary) + # 要预测的地区 （polyline）
+    tm_fill(col = "grey", alpha = 0) +
+    tm_borders("red", lwd = 2) +
+    
+    tm_shape(cf_dat_with_long_lat) + # 分布点 (polypoints)
+    tm_symbols(
+        col = "species",
+        scale = .3,
+        border.col = NA,
+        title.col = "Species",
+        palette = "blue"
+    ) +
+    tm_scale_bar(position = c(0.65, 0.05)) +
+    tm_compass(type = "4star", position = c("left", "top")) +
+    tm_layout(inner.margins = c(0.12, 0.03, 0.08, 0.03),
+              legend.stack = "horizontal") +
+    # title.shape = "Type of record") +
+    tm_legend(legend.position = c(0.05, 0.05)) +
+    tm_layout(title = "Records of Castanopsis fargesii") +
+    tm_xlab("Longitude", size = 1) +
+    tm_ylab("Latitude", size = 1) +
+    tm_shape(world, xlim = c(95, 125), ylim = c(8, 35)) +
+    tm_text("NAME", size = 1.2, col = "grey20") +
+    tm_borders("grey50", lwd = .8)
+# map
+
+# pdf("occurrence_records.pdf", width = 12, height = 12)
+# map
+# dev.off()
+
+map
+
+
+tiff(
+    "occurrence_records.tiff",
+    width = 3600,
+    height = 3600,
+    res = 400,
+    compression = "lzw"
+)
+map
+dev.off()
+
+```
+
+# 分布图局部放大
+```{R}
+map_zoom <- tm_shape(world,
+                     xlim = c(100, 125),
+                     ylim = c(20, 33)) + # 世界政区 (polygon)
+    tm_borders("grey70", lwd = .8) +
+    
+    tm_shape(country) + # 国界线 (polyline)
+    tm_lines(col = "grey")  +
+    
+    tm_shape(province) + # 省份 (polygon)
+    tm_fill(col = "white", alpha = 0) +
+    tm_borders("grey80", lwd = 0.6) +
+    tm_text("ID", size = 0.8, col = "grey20") +
+    
+    tm_shape(boundary) + # 要预测的地区 （polyline）
+    tm_fill(col = "grey", alpha = 0) +
+    tm_borders("red", lwd = 2) +
+    
+    tm_shape(cf_dat_with_long_lat) + # 分布点 (polypoints)
+    tm_symbols(
+        col = "species",
+        scale = .3,
+        border.col = NA,
+        title.col = "Species",
+        palette = "blue"
+    ) +
+    tm_scale_bar(position = c(0.65, 0.05)) +
+    tm_compass(type = "4star", position = c("left", "top")) +
+    tm_layout(inner.margins = c(0.12, 0.03, 0.08, 0.03),
+              legend.stack = "horizontal") +
+    # title.shape = "Type of record") +
+    tm_legend(legend.position = c(0.05, 0.05)) +
+    tm_layout(title = "Records of Castanopsis fargesii") +
+    tm_xlab("Longitude", size = 1) +
+    tm_ylab("Latitude", size = 1) +
+    tm_shape(world, xlim = c(95, 125), ylim = c(8, 35)) +
+    tm_text("NAME", size = 1.2, col = "grey20") +
+    tm_borders("grey50", lwd = .8) 
+
+
+
+
+map_zoom
+
+tiff(
+    "occurrence_records_zoom.tiff",
+    width = 3600,
+    height = 3600,
+    res = 400,
+    compression = "lzw"
+)
+map_zoom
+dev.off()
+
+# 如果要保存为pdf格式
+# pdf("occurrence_records.pdf", width = 12, height = 12)
+# map
+# dev.off()
+
+```
+
+# R Session Information
+
+```{R}
+sessionInfo()
+```
